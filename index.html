@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Advanced Table Extension</title>
+
+  <!-- AG Grid Community -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/ag-grid-community@32.2.2/styles/ag-grid.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/ag-grid-community@32.2.2/styles/ag-theme-alpine.css">
+  <script src="https://cdn.jsdelivr.net/npm/ag-grid-community@32.2.2/dist/ag-grid-community.min.js"></script>
+
+  <!-- Tableau Extensions API (hosted locally) -->
+  <script src="js/tableau.extensions.1.latest.js"></script>
+
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+  <div id="app">
+
+    <!-- Toolbar -->
+    <div id="toolbar">
+      <div id="toolbar-left">
+        <input type="text" id="search-input" placeholder="Search...">
+        <span id="row-count"></span>
+      </div>
+      <div id="toolbar-right">
+        <button id="btn-export-csv" title="Export to CSV">&#8595; CSV</button>
+        <button id="btn-display" title="Display settings">&#9724; Display</button>
+        <button id="btn-header-config" title="Edit column headers">&#9998; Headers</button>
+        <button id="btn-settings" title="Settings">&#9881; Settings</button>
+      </div>
+    </div>
+
+    <!-- AG Grid container -->
+    <div id="grid-container" class="ag-theme-alpine"></div>
+
+    <!-- Loading overlay -->
+    <div id="loading-overlay">
+      <div class="spinner"></div>
+      <p>Loading data...</p>
+    </div>
+
+    <!-- Error message -->
+    <div id="error-message" class="hidden">
+      <p id="error-text"></p>
+      <button id="btn-open-settings-error">Open Settings</button>
+    </div>
+
+    <!-- Display Settings Modal -->
+    <div id="display-modal" class="modal hidden">
+      <div class="modal-backdrop"></div>
+      <div class="modal-content wide">
+        <h2>Display Settings</h2>
+
+        <!-- Global -->
+        <div class="disp-section-label">Global</div>
+        <div class="disp-global-grid">
+          <label class="disp-label">Font family</label>
+          <select id="disp-font-family" class="disp-select">
+            <option value="inherit">Default</option>
+            <option value="Arial, sans-serif">Arial</option>
+            <option value="'Segoe UI', sans-serif">Segoe UI</option>
+            <option value="'Roboto', sans-serif">Roboto</option>
+            <option value="'Courier New', monospace">Courier New</option>
+            <option value="'Times New Roman', serif">Times New Roman</option>
+          </select>
+
+          <label class="disp-label">Font size</label>
+          <input type="number" id="disp-font-size" class="disp-input-sm" value="13" min="8" max="24">
+
+          <label class="disp-label">Bold</label>
+          <input type="checkbox" id="disp-font-weight">
+
+          <label class="disp-label">Column separators</label>
+          <input type="checkbox" id="disp-separators" checked>
+
+          <label class="disp-label">Fit columns to width</label>
+          <input type="checkbox" id="disp-fit-width">
+        </div>
+
+        <!-- Sort -->
+        <div class="disp-section-label" style="margin-top:14px">
+          Default sort
+          <button id="btn-add-sort" class="tree-btn tree-btn-add" style="margin-left:10px;font-size:11px">+ Add</button>
+        </div>
+        <div id="disp-sort-list" class="disp-sort-list"></div>
+
+        <!-- Subtotals -->
+        <div class="disp-section-label" style="margin-top:14px">
+          Subtotals
+          <label class="subtotals-toggle-wrap" style="margin-left:10px;font-size:12px;font-weight:normal">
+            <input type="checkbox" id="disp-subtotals-enabled"> Enable
+          </label>
+        </div>
+        <div id="disp-subtotals-body" class="disp-subtotals-body hidden">
+          <div class="disp-global-grid" style="margin-bottom:8px">
+            <label class="disp-label">Label text</label>
+            <input type="text" id="disp-subtotals-label" class="disp-input-sm" style="width:120px" value="Итого">
+            <label class="disp-label">Background</label>
+            <input type="color" id="disp-subtotals-bg" value="#e8f0fe">
+            <label class="disp-label">Text color</label>
+            <input type="color" id="disp-subtotals-txt" value="#1a237e">
+          </div>
+          <div class="disp-sub-label">Per-column aggregation</div>
+          <div id="disp-subtotals-cols" class="disp-subtotals-cols"></div>
+        </div>
+
+        <!-- Per-column -->
+        <div class="disp-section-label" style="margin-top:14px">Column settings</div>
+        <div id="disp-columns-list" class="disp-columns-list"></div>
+
+        <div class="modal-buttons">
+          <button id="btn-save-display" class="btn-primary">Apply</button>
+          <button id="btn-cancel-display" class="btn-secondary">Cancel</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Header Config Modal -->
+    <div id="header-modal" class="modal hidden">
+      <div class="modal-backdrop"></div>
+      <div class="modal-content wide">
+        <h2>Edit Column Headers</h2>
+
+        <!-- Global colors -->
+        <div class="hdr-global-row">
+          <span class="hdr-global-label">Default header:</span>
+          <span class="color-picker-wrap" title="Background color">
+            <span class="color-picker-label">Bg</span>
+            <input type="color" id="hdr-global-bg" class="color-picker-input" value="#f5f7fa">
+          </span>
+          <span class="color-picker-wrap" title="Text color">
+            <span class="color-picker-label">Txt</span>
+            <input type="color" id="hdr-global-color" class="color-picker-input" value="#333333">
+          </span>
+          <button id="btn-add-root-group" class="tree-btn tree-btn-add">+ Add Group</button>
+        </div>
+
+        <!-- Tree editor -->
+        <div id="hdr-tree" class="hdr-tree"></div>
+
+        <!-- Unassigned fields -->
+        <div class="hdr-unassigned-section">
+          <span class="hdr-section-label">Unassigned fields:</span>
+          <div id="hdr-unassigned" class="hdr-unassigned"></div>
+        </div>
+
+        <div class="modal-buttons">
+          <button id="btn-save-header" class="btn-primary">Apply</button>
+          <button id="btn-cancel-header" class="btn-secondary">Cancel</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Config Modal -->
+    <div id="config-modal" class="modal hidden">
+      <div class="modal-backdrop"></div>
+      <div class="modal-content">
+        <h2>Table Settings</h2>
+
+        <div class="form-group">
+          <label>Grouping columns <span class="hint">(check and drag to reorder)</span></label>
+          <div id="grouping-columns-list"></div>
+        </div>
+
+        <div class="modal-buttons">
+          <button id="btn-save-config" class="btn-primary">Apply</button>
+          <button id="btn-cancel-config" class="btn-secondary">Cancel</button>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <script src="js/utils.js"></script>
+  <script src="js/table.js"></script>
+  <script src="js/config.js"></script>
+  <script src="js/headerConfig.js"></script>
+  <script src="js/displayConfig.js"></script>
+  <script src="js/main.js"></script>
+
+</body>
+</html>
