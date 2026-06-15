@@ -1,6 +1,7 @@
 const Table = (() => {
   let gridApi = null;
-  let currentData = [];
+  let currentData    = [];  // processed data (sorted + subtotals + merges applied)
+  let currentRawData = [];  // pre-merge snapshot, used for clean re-sort
   let currentColumns = [];
   let currentGroupCols = [];
   let isSearchActive = false;
@@ -250,15 +251,14 @@ const Table = (() => {
       onFilterChanged: _updateRowCount,
       onSortChanged: () => {
         const colState = gridApi.getColumnState().filter(c => c.sort);
-        if (!colState.length) return;
         if (typeof DisplayConfig !== 'undefined') {
           colState.sort((a, b) => (a.sortIndex ?? 0) - (b.sortIndex ?? 0));
           DisplayConfig.getConfig().sortRules = colState.map(c => ({
             field: c.colId, direction: c.sort,
           }));
         }
-        // Strip injected subtotal rows before re-sorting
-        const rawData = currentData.filter(r => !r._isSubtotal);
+        // Clone rows from snapshot so _applyManualMerges doesn't corrupt currentRawData
+        const rawData = currentRawData.map(r => Object.assign({}, r));
         _sortData(rawData);
         currentData = _injectSubtotals(rawData, currentGroupCols);
         calcSpans(currentData, currentGroupCols);
@@ -274,19 +274,24 @@ const Table = (() => {
   }
 
   function render(data, columns, groupCols) {
-    currentData = data;
+    // Stamp stable _rowId on source rows (idempotent — safe to mutate App._lastData with this).
+    data.forEach((row, i) => { row._rowId = i; });
+
+    // currentRawData is the authoritative pre-merge source for re-sorts.
+    // Only _rowId is ever written to these rows — never aggregate values.
+    currentRawData = data;
+
+    // workData is a shallow clone so _applyManualMerges mutates clones, not source rows.
+    let workData = data.map(r => Object.assign({}, r));
+
     currentColumns = columns;
     currentGroupCols = groupCols;
-    isSearchActive = false;
-
-    // Stamp stable row IDs once (needed for getRowId)
-    data.forEach((row, i) => { row._rowId = i; });
     isSearchActive = false;
     gridApi.setGridOption('quickFilterText', '');
 
     // Heavy processing — sort → subtotals → spans → manual merges → boundaries
-    _sortData(currentData);
-    currentData = _injectSubtotals(currentData, currentGroupCols);
+    _sortData(workData);
+    currentData = _injectSubtotals(workData, currentGroupCols);
     calcSpans(currentData, currentGroupCols);
     const manualGroups = typeof DisplayConfig !== 'undefined' ? DisplayConfig.getConfig().manualMergeGroups : null;
     _applyManualMerges(currentData, manualGroups);
@@ -423,7 +428,7 @@ const Table = (() => {
   function copyToClipboard() {
     const visibleCols = gridApi.getAllDisplayedColumns()
       .map(c => c.getColId())
-      .filter(id => !id.startsWith('_span_'));
+      .filter(id => !id.startsWith('_span_') && !id.startsWith('ag-'));
 
     const headerRow = visibleCols
       .map(id => { const col = currentColumns.find(c => c.field === id); return col?.headerName || id; })
@@ -438,10 +443,35 @@ const Table = (() => {
     }).join('\t'));
 
     const tsv = [headerRow, ...dataRows].join('\n');
-    navigator.clipboard.writeText(tsv).then(() => {
+
+    const _flash = () => {
       const btn = document.getElementById('btn-copy-clipboard');
-      if (btn) { const orig = btn.textContent; btn.textContent = '✓ Copied'; setTimeout(() => { btn.textContent = orig; }, 1500); }
-    }).catch(() => {});
+      if (!btn) return;
+      const orig = btn.textContent;
+      btn.textContent = '✓ Copied';
+      setTimeout(() => { btn.textContent = orig; }, 1500);
+    };
+
+    // Try modern API first, fall back to execCommand for iframe/HTTP contexts
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(tsv).then(_flash).catch(() => _execCopy(tsv, _flash));
+    } else {
+      _execCopy(tsv, _flash);
+    }
+  }
+
+  function _execCopy(text, onSuccess) {
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.style.cssText = 'position:fixed;top:-9999px;left:-9999px;opacity:0';
+    document.body.appendChild(ta);
+    ta.focus();
+    ta.select();
+    try {
+      const ok = document.execCommand('copy');
+      if (ok && onSuccess) onSuccess();
+    } catch(e) {}
+    document.body.removeChild(ta);
   }
 
   function destroy() {
@@ -449,11 +479,6 @@ const Table = (() => {
       gridApi.destroy();
       gridApi = null;
     }
-  }
-
-  function _refresh() {
-    calcSpans(currentData, currentGroupCols);
-    gridApi.setGridOption('rowData', [...currentData]);
   }
 
   function _updateRowCount() {
