@@ -228,22 +228,7 @@ const HeaderConfig = (() => {
   }
 
   function _colorPicker(value, onChange, label) {
-    const wrap = document.createElement('span');
-    wrap.className = 'color-picker-wrap';
-    wrap.title = label + ' color';
-
-    const inp = document.createElement('input');
-    inp.type = 'color';
-    inp.className = 'color-picker-input';
-    inp.value = value || '#f5f7fa';
-    inp.oninput = (e) => onChange(e.target.value);
-
-    const lbl = document.createElement('span');
-    lbl.className = 'color-picker-label';
-    lbl.textContent = label;
-
-    wrap.append(lbl, inp);
-    return wrap;
+    return Palettes.colorInput(value || '#f5f7fa', onChange, label);
   }
 
   function _moveBtn(label, onclick) {

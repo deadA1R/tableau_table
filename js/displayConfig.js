@@ -729,21 +729,7 @@ const DisplayConfig = (() => {
   }
 
   function _colorPickerEl(value, onChange, label) {
-    const wrap = document.createElement('span');
-    wrap.className = 'color-picker-wrap';
-
-    const lbl = document.createElement('span');
-    lbl.className = 'color-picker-label';
-    lbl.textContent = label;
-
-    const inp = document.createElement('input');
-    inp.type = 'color';
-    inp.className = 'color-picker-input';
-    inp.value = value || '#ffffff';
-    inp.oninput = (e) => onChange(e.target.value);
-
-    wrap.append(lbl, inp);
-    return wrap;
+    return Palettes.colorInput(value || '#ffffff', onChange, label);
   }
 
   // ── Save ───────────────────────────────────────────────────────────────

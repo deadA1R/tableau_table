@@ -80,7 +80,10 @@ function _registerListeners() {
   const unsubMark = App.worksheet.addEventListener(
     tableau.TableauEventType.MarkSelectionChanged, _onDataChanged
   );
-  _currentListeners.push(unsubFilter, unsubMark);
+  const unsubSummary = App.worksheet.addEventListener(
+    tableau.TableauEventType.SummaryDataChanged, _onDataChanged
+  );
+  _currentListeners.push(unsubFilter, unsubMark, unsubSummary);
 }
 
 let _reloadTimer = null;
