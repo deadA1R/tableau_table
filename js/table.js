@@ -142,18 +142,50 @@ const Table = (() => {
         if (dc)             def.valueFormatter = DisplayConfig.makeValueFormatter(col.field);
 
         if (isMerged) {
-          def.rowSpan = (params) => {
-            const span = params.data?.['_span_' + col.field];
-            return span === 0 ? 1 : (span ?? 1);
-          };
           def.cellClassRules = {
             'cell-span': (params) => (params.data?.['_span_' + col.field] ?? 1) > 1,
           };
-          def.cellStyle = (params) => {
-            const span = params.data?.['_span_' + col.field];
-            if (span === 0) return { opacity: 0, pointerEvents: 'none', borderBottom: 'none' };
-            return dc ? DisplayConfig.makeCellStyle(col.field)(params) : { textAlign: 'center' };
-          };
+
+          if (isGroup) {
+            // Group merge: rowSpan collapses covered rows entirely (all columns span together)
+            def.rowSpan = (params) => {
+              const span = params.data?.['_span_' + col.field];
+              return span === 0 ? 1 : (span ?? 1);
+            };
+            def.cellStyle = (params) => {
+              const span = params.data?.['_span_' + col.field];
+              if (span === 0) return { opacity: 0, pointerEvents: 'none', borderBottom: 'none' };
+              return dc ? DisplayConfig.makeCellStyle(col.field)(params) : { textAlign: 'center' };
+            };
+          } else {
+            // Manual merge: no rowSpan — rows stay at full height so other columns remain visible.
+            // The first cell gets an absolutely-positioned overlay that visually spans multiple rows.
+            const rowH = dc?.rowHeight || 32;
+
+            def.cellRenderer = (params) => {
+              const span = params.data?.['_span_' + col.field];
+              if (span === 0) return '';
+              const displayVal = String(params.valueFormatted ?? params.value ?? '');
+              if ((span ?? 1) <= 1) return displayVal;
+              const div = document.createElement('div');
+              div.className = 'manual-merge-overlay';
+              div.style.height = (span * rowH) + 'px';
+              div.textContent = displayVal;
+              return div;
+            };
+
+            def.cellStyle = (params) => {
+              const span = params.data?.['_span_' + col.field];
+              const base = dc ? DisplayConfig.makeCellStyle(col.field)(params) : { textAlign: 'center' };
+              if (span === 0) {
+                return { ...base, color: 'transparent', borderTop: 'none', borderBottom: 'none', userSelect: 'none' };
+              }
+              if ((span ?? 1) > 1) {
+                return { ...base, overflow: 'visible', padding: '0', borderBottom: 'none' };
+              }
+              return base;
+            };
+          }
         } else {
           def.cellStyle = dc
             ? DisplayConfig.makeCellStyle(col.field)
@@ -175,6 +207,7 @@ const Table = (() => {
   }
 
   function _applyManualMerges(data, groups) {
+    data.forEach(row => { delete row._manualMergeStart; });
     if (!groups?.length) return;
     groups.forEach(group => {
       const start  = group.rowStart;
@@ -182,6 +215,8 @@ const Table = (() => {
       if (start < 0 || start >= data.length || end <= start) return;
       const span   = end - start + 1;
       const colAgg = group.colAgg || {};
+
+      data[start]._manualMergeStart = true;
 
       (group.columns || []).forEach(col => {
         const agg = colAgg[col] || 'first';
@@ -246,6 +281,10 @@ const Table = (() => {
       suppressColumnVirtualisation: false,
       suppressRowVirtualisation: false,
       getRowId: (params) => params.data._rowId,  // stable row identity
+      getRowStyle: (params) => {
+        if (params.data?._manualMergeStart) return { zIndex: '1', overflow: 'visible' };
+        return null;
+      },
 
       onBodyScroll: _updateStickyGroupRow,
       onFilterChanged: _updateRowCount,
