@@ -277,10 +277,18 @@ const DisplayConfig = (() => {
 
     // Colors
     const bgEl = document.getElementById('disp-subtotals-bg');
-    if (bgEl) { bgEl.value = st.bgColor || '#e8f0fe'; bgEl.oninput = (e) => { st.bgColor = e.target.value; }; }
+    if (bgEl) {
+      bgEl.value = st.bgColor || '#e8f0fe';
+      bgEl.oninput = (e) => { st.bgColor = e.target.value; };
+      _addPaletteBtn(bgEl, (c) => { st.bgColor = c; });
+    }
 
     const txtEl = document.getElementById('disp-subtotals-txt');
-    if (txtEl) { txtEl.value = st.textColor || '#1a237e'; txtEl.oninput = (e) => { st.textColor = e.target.value; }; }
+    if (txtEl) {
+      txtEl.value = st.textColor || '#1a237e';
+      txtEl.oninput = (e) => { st.textColor = e.target.value; };
+      _addPaletteBtn(txtEl, (c) => { st.textColor = c; });
+    }
 
     // Grand total
     const gtEnabled = document.getElementById('disp-grand-total-enabled');
@@ -730,6 +738,20 @@ const DisplayConfig = (() => {
 
   function _colorPickerEl(value, onChange, label) {
     return Palettes.colorInput(value || '#ffffff', onChange, label);
+  }
+
+  function _addPaletteBtn(inp, onChange) {
+    if (!inp || inp.nextElementSibling?.classList.contains('pal-inline-btn')) return;
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'pal-inline-btn';
+    btn.title = 'Pick from palette';
+    btn.textContent = '▤';
+    btn.onclick = (e) => {
+      e.preventDefault(); e.stopPropagation();
+      Palettes.showPicker(btn, (c) => { inp.value = c; onChange(c); });
+    };
+    inp.after(btn);
   }
 
   // ── Save ───────────────────────────────────────────────────────────────

@@ -23,6 +23,20 @@ const HeaderConfig = (() => {
     return 'g' + Math.random().toString(36).slice(2, 9);
   }
 
+  function _addPaletteBtn(inp, onChange) {
+    if (!inp || inp.nextElementSibling?.classList.contains('pal-inline-btn')) return;
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'pal-inline-btn';
+    btn.title = 'Pick from palette';
+    btn.textContent = '▤';
+    btn.onclick = (e) => {
+      e.preventDefault(); e.stopPropagation();
+      Palettes.showPicker(btn, (c) => { inp.value = c; onChange(c); });
+    };
+    inp.after(btn);
+  }
+
   // ── Public API ─────────────────────────────────────────────────────────
 
   function init(onSave) {
@@ -34,8 +48,13 @@ const HeaderConfig = (() => {
       _config.tree.push({ type: 'group', id: _genId(), name: 'New Group', bg: '', textColor: '', children: [] });
       _renderTree();
     };
-    document.getElementById('hdr-global-bg').oninput    = (e) => { _config.globalHeaderBg = e.target.value; _injectStyles(); };
-    document.getElementById('hdr-global-color').oninput = (e) => { _config.globalHeaderColor = e.target.value; _injectStyles(); };
+    const bgInp = document.getElementById('hdr-global-bg');
+    bgInp.oninput = (e) => { _config.globalHeaderBg = e.target.value; _injectStyles(); };
+    _addPaletteBtn(bgInp, (c) => { _config.globalHeaderBg = c; _injectStyles(); });
+
+    const colorInp = document.getElementById('hdr-global-color');
+    colorInp.oninput = (e) => { _config.globalHeaderColor = e.target.value; _injectStyles(); };
+    _addPaletteBtn(colorInp, (c) => { _config.globalHeaderColor = c; _injectStyles(); });
   }
 
   function load(wsName) {
