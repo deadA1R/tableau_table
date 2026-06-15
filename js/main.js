@@ -19,17 +19,25 @@ document.addEventListener('DOMContentLoaded', () => {
   Utils.showLoading();
 
   tableau.extensions.initializeAsync().then(() => {
-    const dashboard = tableau.extensions.dashboardContent.dashboard;
-    App.worksheets = dashboard.worksheets;
+    if (tableau.extensions.worksheetContent) {
+      // ── Viz extension mode ──────────────────────────────────────────────
+      // Embedded directly in a worksheet — single worksheet, no picker.
+      App.isVizMode = true;
+      App.worksheet  = tableau.extensions.worksheetContent.worksheet;
+      App.worksheets = [App.worksheet];
+    } else {
+      // ── Dashboard extension mode ────────────────────────────────────────
+      const dashboard = tableau.extensions.dashboardContent.dashboard;
+      App.worksheets  = dashboard.worksheets;
 
-    if (!App.worksheets.length) {
-      Utils.showError('No worksheets found. Add at least one worksheet to the dashboard.');
-      return;
+      if (!App.worksheets.length) {
+        Utils.showError('No worksheets found. Add at least one worksheet to the dashboard.');
+        return;
+      }
+
+      const savedWsName = localStorage.getItem(STORAGE_WS_KEY);
+      App.worksheet = App.worksheets.find(ws => ws.name === savedWsName) || App.worksheets[0];
     }
-
-    // Restore saved worksheet selection
-    const savedWsName = localStorage.getItem(STORAGE_WS_KEY);
-    App.worksheet = App.worksheets.find(ws => ws.name === savedWsName) || App.worksheets[0];
 
     _applyModeRestrictions();
     _registerListeners();
@@ -167,7 +175,7 @@ function _bindToolbar() {
   });
 
   document.getElementById('btn-settings').addEventListener('click', () => {
-    Config.open(App.worksheets, App.worksheet?.name, App.allColumns, App.groupFields);
+    Config.open(App.worksheets, App.worksheet?.name, App.allColumns, App.groupFields, App.isVizMode);
   });
 
   document.getElementById('btn-header-config').addEventListener('click', () => {

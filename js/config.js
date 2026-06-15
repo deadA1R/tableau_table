@@ -13,9 +13,12 @@ const Config = (() => {
     modal().querySelector('.modal-backdrop').onclick = close;
   }
 
-  function open(worksheets, currentWsName, columns, currentGroupFields) {
+  function open(worksheets, currentWsName, columns, currentGroupFields, isVizMode) {
     _worksheets    = worksheets || [];
     _currentWsName = currentWsName || '';
+
+    const pickerRow = document.getElementById('worksheet-select')?.closest('.form-group');
+    if (pickerRow) pickerRow.style.display = isVizMode ? 'none' : '';
 
     _renderWorksheetPicker();
     _render(columns, currentGroupFields);

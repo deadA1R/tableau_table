@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest manifest-version="0.1" xmlns="http://www.tableau.com/xml/extension_manifest">
+  <worksheet-extension id="com.a2data.advanced-table-viz.v1" extension-version="1.0.0">
+    <default-locale>en_US</default-locale>
+    <name resource-id="name"/>
+    <description>Advanced Table with hierarchical grouping and cell merging</description>
+    <author name="I.D." email="USER@example.com" organization="A2DATA" website="https://www.example.com"/>
+    <min-api-version>1.1</min-api-version>
+    <source-location>
+      <url>http://localhost:8765/index.html</url>
+    </source-location>
+    <icon/>
+    <permissions>
+      <permission>full data</permission>
+    </permissions>
+  </worksheet-extension>
+  <resources>
+    <resource id="name">
+      <text locale="en_US">Advanced Table (LOCAL VIZ)</text>
+    </resource>
+  </resources>
+</manifest>
