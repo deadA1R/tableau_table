@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest manifest-version="0.1" xmlns="http://www.tableau.com/xml/extension_manifest">
-  <worksheet-extension id="com.a2data.advanced-table.v1" extension-version="1.0.0">
+  <dashboard-extension id="com.a2data.advanced-table.v1" extension-version="1.0.0">
     <default-locale>en_US</default-locale>
     <name resource-id="name"/>
     <description>Advanced Table with hierarchical grouping and cell merging</description>
@@ -13,40 +13,10 @@
     <permissions>
       <permission>full data</permission>
     </permissions>
-    <encoding id="group">
-      <display-name resource-id="encoding-group">Group By</display-name>
-      <fields max-count="10"/>
-      <encoding-icon token="letter-g"/>
-      <tooltip resource-id="tooltip-group">Fields to group and merge rows by</tooltip>
-    </encoding>
-    <encoding id="columns">
-      <display-name resource-id="encoding-columns">Columns</display-name>
-      <fields max-count="50"/>
-      <encoding-icon token="letter-c"/>
-      <tooltip resource-id="tooltip-columns">Additional columns to display</tooltip>
-    </encoding>
-  </worksheet-extension>
+  </dashboard-extension>
   <resources>
     <resource id="name">
       <text locale="en_US">Advanced Table (LOCAL)</text>
-      <text locale="fr_BE">Advanced Table (LOCAL)</text>
-      <text locale="de_DE">Advanced Table (LOCAL)</text>
-    </resource>
-    <resource id="encoding-group">
-      <text locale="en_US">Group By</text>
-      <text locale="fr_BE">Group By</text>
-      <text locale="de_DE">Group By</text>
-    </resource>
-    <resource id="encoding-columns">
-      <text locale="en_US">Columns</text>
-      <text locale="fr_BE">Columns</text>
-      <text locale="de_DE">Columns</text>
-    </resource>
-    <resource id="tooltip-group">
-      <text locale="en_US">Fields to group and merge rows by</text>
-    </resource>
-    <resource id="tooltip-columns">
-      <text locale="en_US">Additional columns to display</text>
     </resource>
   </resources>
 </manifest>

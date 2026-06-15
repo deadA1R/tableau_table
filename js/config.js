@@ -1,5 +1,7 @@
 const Config = (() => {
   let _onSave = null;
+  let _worksheets = [];
+  let _currentWsName = '';
 
   const modal    = () => document.getElementById('config-modal');
   const colsList = () => document.getElementById('grouping-columns-list');
@@ -11,13 +13,30 @@ const Config = (() => {
     modal().querySelector('.modal-backdrop').onclick = close;
   }
 
-  function open(columns, currentGroupFields) {
+  function open(worksheets, currentWsName, columns, currentGroupFields) {
+    _worksheets    = worksheets || [];
+    _currentWsName = currentWsName || '';
+
+    _renderWorksheetPicker();
     _render(columns, currentGroupFields);
     modal().classList.remove('hidden');
   }
 
   function close() {
     modal().classList.add('hidden');
+  }
+
+  function _renderWorksheetPicker() {
+    const sel = document.getElementById('worksheet-select');
+    if (!sel) return;
+    sel.innerHTML = '';
+    _worksheets.forEach(ws => {
+      const opt = document.createElement('option');
+      opt.value = ws.name;
+      opt.textContent = ws.name;
+      opt.selected = ws.name === _currentWsName;
+      sel.appendChild(opt);
+    });
   }
 
   function _render(columns, selectedFields) {
@@ -100,8 +119,10 @@ const Config = (() => {
   }
 
   function _save() {
+    const sel = document.getElementById('worksheet-select');
+    const wsName = sel ? sel.value : _currentWsName;
     close();
-    if (_onSave) _onSave(_getChecked());
+    if (_onSave) _onSave(wsName, _getChecked());
   }
 
   return { init, open, close };

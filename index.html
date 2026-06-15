@@ -26,7 +26,10 @@
         <span id="row-count"></span>
       </div>
       <div id="toolbar-right">
+        <button id="btn-copy-clipboard" title="Copy visible rows to clipboard (TSV for Excel)">&#128203; Copy</button>
         <button id="btn-export-csv" title="Export to CSV">&#8595; CSV</button>
+        <button id="btn-computed-cols" title="Computed columns">&#931; Computed</button>
+        <button id="btn-palettes" title="Color palettes">&#9783; Palettes</button>
         <button id="btn-display" title="Display settings">&#9724; Display</button>
         <button id="btn-header-config" title="Edit column headers">&#9998; Headers</button>
         <button id="btn-settings" title="Settings">&#9881; Settings</button>
@@ -78,6 +81,17 @@
 
           <label class="disp-label">Fit columns to width</label>
           <input type="checkbox" id="disp-fit-width">
+
+          <label class="disp-label">Row height</label>
+          <select id="disp-row-height" class="disp-select" style="width:auto">
+            <option value="24">Compact (24px)</option>
+            <option value="32">Normal (32px)</option>
+            <option value="40">Comfortable (40px)</option>
+            <option value="48">Spacious (48px)</option>
+          </select>
+
+          <label class="disp-label">Freeze columns (left)</label>
+          <input type="number" id="disp-freeze-cols" class="disp-input-sm" value="0" min="0" max="30">
         </div>
 
         <!-- Sort -->
@@ -102,10 +116,23 @@
             <input type="color" id="disp-subtotals-bg" value="#e8f0fe">
             <label class="disp-label">Text color</label>
             <input type="color" id="disp-subtotals-txt" value="#1a237e">
+
+            <label class="disp-label">Grand total row</label>
+            <input type="checkbox" id="disp-grand-total-enabled">
+            <label class="disp-label">Grand total label</label>
+            <input type="text" id="disp-grand-total-label" class="disp-input-sm" style="width:120px" value="Grand Total">
           </div>
           <div class="disp-sub-label">Per-column aggregation</div>
           <div id="disp-subtotals-cols" class="disp-subtotals-cols"></div>
         </div>
+
+        <!-- Manual Row Groups -->
+        <div class="disp-section-label" style="margin-top:14px">
+          Manual row merges
+          <button id="btn-add-manual-group" class="tree-btn tree-btn-add" style="margin-left:10px;font-size:11px">+ Add Group</button>
+        </div>
+        <div id="disp-manual-info" style="font-size:11px;color:#aaa;margin-bottom:6px"></div>
+        <div id="disp-manual-list" class="disp-manual-list"></div>
 
         <!-- Per-column -->
         <div class="disp-section-label" style="margin-top:14px">Column settings</div>
@@ -161,6 +188,11 @@
         <h2>Table Settings</h2>
 
         <div class="form-group">
+          <label>Worksheet</label>
+          <select id="worksheet-select" style="width:100%;padding:6px 8px;border:1px solid #ccc;border-radius:4px;font-size:13px;outline:none"></select>
+        </div>
+
+        <div class="form-group">
           <label>Grouping columns <span class="hint">(check and drag to reorder)</span></label>
           <div id="grouping-columns-list"></div>
         </div>
@@ -175,6 +207,8 @@
   </div>
 
   <script src="js/utils.js"></script>
+  <script src="js/palettes.js"></script>
+  <script src="js/computedColumns.js"></script>
   <script src="js/table.js"></script>
   <script src="js/config.js"></script>
   <script src="js/headerConfig.js"></script>

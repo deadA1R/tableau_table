@@ -5,6 +5,7 @@ const DisplayConfig = (() => {
   let _onSave = null;
 
   let _config = _default();
+  let _rowCount = 0;
 
   function _default() {
     return {
@@ -13,17 +14,35 @@ const DisplayConfig = (() => {
       fontWeight: 'normal',
       showSeparators: true,
       fitToWidth: false,
-      sortRules: [], // [{ field, direction: 'asc'|'desc' }]
+      rowHeight: 32,
+      frozenColumns: 0,
+      sortRules: [],
       subtotals: {
         enabled: false,
-        groupLevelIdx: 0,   // index into groupCols array
-        operations: {},     // field -> 'sum'|'count'|'avg'|'min'|'max'
+        operations: {},
         labelText: 'Итого',
         bgColor: '#e8f0fe',
         textColor: '#1a237e',
+        showGrandTotal: false,
+        grandTotalLabel: 'Grand Total',
       },
+      manualMergeGroups: [],
       columns: {},
     };
+  }
+
+  function _colDefault() {
+    return {
+      hidden: false,
+      align: 'center',
+      numberFormat: { decimals: '', thousandsSep: false, prefix: '', suffix: '' },
+      aliases: {},
+      rules: [],
+    };
+  }
+
+  function _genId() {
+    return 'm' + Math.random().toString(36).slice(2, 9);
   }
 
   // ── Public ─────────────────────────────────────────────────────────────
@@ -39,7 +58,14 @@ const DisplayConfig = (() => {
     _worksheetName = wsName;
     try {
       const raw = localStorage.getItem(STORAGE_KEY + '_' + wsName);
-      _config = raw ? Object.assign(_default(), JSON.parse(raw)) : _default();
+      if (!raw) { _config = _default(); return; }
+      const saved = JSON.parse(raw);
+      const def   = _default();
+      _config = Object.assign(def, saved);
+      _config.subtotals         = Object.assign(def.subtotals, saved.subtotals || {});
+      _config.columns           = saved.columns || {};
+      _config.manualMergeGroups = saved.manualMergeGroups || [];
+      _config.sortRules         = saved.sortRules || [];
     } catch (e) { _config = _default(); }
   }
 
@@ -49,14 +75,17 @@ const DisplayConfig = (() => {
     } catch (e) {}
   }
 
-  function open(columns, wsName) {
+  function open(columns, wsName, rowCount) {
     _columns = columns;
+    _rowCount = rowCount || 0;
     load(wsName);
     if (!_config.sortRules) _config.sortRules = [];
     if (!_config.subtotals) _config.subtotals = _default().subtotals;
+    if (!_config.manualMergeGroups) _config.manualMergeGroups = [];
     _renderGlobal();
     _renderSort();
     _renderSubtotals();
+    _renderManualMerges();
     _renderColumns();
     document.getElementById('display-modal').classList.remove('hidden');
   }
@@ -67,21 +96,43 @@ const DisplayConfig = (() => {
 
   function getConfig() { return _config; }
 
-  // Apply a valueFormatter for aliases
+  // Apply a valueFormatter: number format → aliases
   function makeValueFormatter(field) {
     return (params) => {
       const cfg = _config.columns[field];
-      if (!cfg?.aliases) return params.value ?? '';
-      const key = params.value === null || params.value === undefined ? 'null' : String(params.value);
-      return cfg.aliases[key] ?? cfg.aliases['*'] ?? (params.value ?? '');
+      const raw = params.value ?? '';
+
+      // Aliases checked first on raw value
+      if (cfg?.aliases) {
+        const key = raw === null || raw === undefined ? 'null' : String(raw);
+        const alias = cfg.aliases[key] ?? cfg.aliases['*'];
+        if (alias !== undefined) return alias;
+      }
+
+      // Number formatting
+      const nf = cfg?.numberFormat;
+      if (nf && (nf.decimals !== '' && nf.decimals != null || nf.prefix || nf.suffix || nf.thousandsSep)) {
+        const num = parseFloat(String(raw).replace(/[^0-9.\-]/g, ''));
+        if (!isNaN(num)) {
+          const dec = (nf.decimals !== '' && nf.decimals != null) ? parseInt(nf.decimals) : null;
+          let s = dec !== null ? num.toFixed(dec) : String(raw);
+          if (nf.thousandsSep && dec !== null) {
+            const [intPart, fracPart] = s.split('.');
+            s = intPart.replace(/\B(?=(\d{3})+(?!\d))/g, ' ') + (fracPart !== undefined ? '.' + fracPart : '');
+          }
+          return (nf.prefix || '') + s + (nf.suffix || '');
+        }
+      }
+
+      return raw;
     };
   }
 
-  // Apply a cellStyle for conditional formatting
-  function makeCellStyle(field, baseAlign) {
+  // Apply a cellStyle: alignment from config + conditional formatting
+  function makeCellStyle(field) {
     return (params) => {
-      const base = { textAlign: baseAlign || 'center' };
       const cfg = _config.columns[field];
+      const base = { textAlign: cfg?.align || 'center' };
       if (!cfg?.rules?.length) return base;
       for (const rule of cfg.rules) {
         if (_matchRule(params.value, rule)) {
@@ -114,11 +165,13 @@ const DisplayConfig = (() => {
   // ── Global settings render ─────────────────────────────────────────────
 
   function _renderGlobal() {
-    document.getElementById('disp-font-family').value  = _config.fontFamily || 'inherit';
-    document.getElementById('disp-font-size').value    = _config.fontSize || 13;
-    document.getElementById('disp-font-weight').checked = _config.fontWeight === 'bold';
-    document.getElementById('disp-separators').checked  = _config.showSeparators !== false;
-    document.getElementById('disp-fit-width').checked   = !!_config.fitToWidth;
+    document.getElementById('disp-font-family').value    = _config.fontFamily || 'inherit';
+    document.getElementById('disp-font-size').value      = _config.fontSize || 13;
+    document.getElementById('disp-font-weight').checked  = _config.fontWeight === 'bold';
+    document.getElementById('disp-separators').checked   = _config.showSeparators !== false;
+    document.getElementById('disp-fit-width').checked    = !!_config.fitToWidth;
+    document.getElementById('disp-row-height').value     = String(_config.rowHeight || 32);
+    document.getElementById('disp-freeze-cols').value    = _config.frozenColumns || 0;
 
     document.getElementById('btn-add-sort').onclick = () => {
       if (!_config.sortRules) _config.sortRules = [];
@@ -132,6 +185,8 @@ const DisplayConfig = (() => {
     document.getElementById('disp-font-weight').onchange  = (e) => { _config.fontWeight = e.target.checked ? 'bold' : 'normal'; };
     document.getElementById('disp-separators').onchange   = (e) => { _config.showSeparators = e.target.checked; };
     document.getElementById('disp-fit-width').onchange    = (e) => { _config.fitToWidth = e.target.checked; };
+    document.getElementById('disp-row-height').onchange   = (e) => { _config.rowHeight = parseInt(e.target.value) || 32; };
+    document.getElementById('disp-freeze-cols').oninput   = (e) => { _config.frozenColumns = Math.max(0, parseInt(e.target.value) || 0); };
   }
 
   // ── Sort render ────────────────────────────────────────────────────────
@@ -227,6 +282,12 @@ const DisplayConfig = (() => {
     const txtEl = document.getElementById('disp-subtotals-txt');
     if (txtEl) { txtEl.value = st.textColor || '#1a237e'; txtEl.oninput = (e) => { st.textColor = e.target.value; }; }
 
+    // Grand total
+    const gtEnabled = document.getElementById('disp-grand-total-enabled');
+    const gtLabel   = document.getElementById('disp-grand-total-label');
+    if (gtEnabled) { gtEnabled.checked = !!st.showGrandTotal; gtEnabled.onchange = (e) => { st.showGrandTotal = e.target.checked; }; }
+    if (gtLabel)   { gtLabel.value = st.grandTotalLabel || 'Grand Total'; gtLabel.oninput = (e) => { st.grandTotalLabel = e.target.value; }; }
+
     // Per-column operations for numeric columns
     const colsEl = document.getElementById('disp-subtotals-cols');
     if (!colsEl) return;
@@ -259,22 +320,145 @@ const DisplayConfig = (() => {
     });
   }
 
+  // ── Manual row merge groups ────────────────────────────────────────────
+
+  function _renderManualMerges() {
+    const list = document.getElementById('disp-manual-list');
+    const info = document.getElementById('disp-manual-info');
+    if (!list) return;
+
+    if (info) info.textContent = _rowCount > 0 ? `${_rowCount} rows in current data (0-based indices)` : '';
+
+    document.getElementById('btn-add-manual-group').onclick = () => {
+      _config.manualMergeGroups.push({ id: _genId(), rowStart: 0, rowEnd: 1, columns: [] });
+      _renderManualMerges();
+    };
+
+    list.innerHTML = '';
+    (_config.manualMergeGroups || []).forEach((group, i) => {
+      list.appendChild(_buildManualGroupRow(group, i));
+    });
+  }
+
+  function _buildManualGroupRow(group, idx) {
+    const wrap = document.createElement('div');
+    wrap.className = 'manual-group-row';
+
+    const delBtn = document.createElement('button');
+    delBtn.className = 'tree-btn tree-btn-del';
+    delBtn.textContent = '✕';
+    delBtn.onclick = () => {
+      _config.manualMergeGroups.splice(idx, 1);
+      _renderManualMerges();
+    };
+
+    const rangeWrap = document.createElement('div');
+    rangeWrap.className = 'manual-group-range';
+
+    const lbl = document.createElement('span');
+    lbl.className = 'manual-group-label';
+    lbl.textContent = 'Rows';
+
+    const startInput = document.createElement('input');
+    startInput.type = 'number';
+    startInput.className = 'manual-group-num';
+    startInput.min = 0;
+    startInput.max = Math.max(0, _rowCount - 1);
+    startInput.value = group.rowStart;
+    startInput.oninput = (e) => { group.rowStart = Math.max(0, parseInt(e.target.value) || 0); };
+
+    const dash = document.createElement('span');
+    dash.className = 'manual-group-dash';
+    dash.textContent = '–';
+
+    const endInput = document.createElement('input');
+    endInput.type = 'number';
+    endInput.className = 'manual-group-num';
+    endInput.min = 0;
+    endInput.max = Math.max(0, _rowCount - 1);
+    endInput.value = group.rowEnd;
+    endInput.oninput = (e) => { group.rowEnd = Math.max(0, parseInt(e.target.value) || 0); };
+
+    rangeWrap.append(lbl, startInput, dash, endInput);
+
+    if (!group.colAgg) group.colAgg = {};
+
+    const colsWrap = document.createElement('div');
+    colsWrap.className = 'manual-cols-grid';
+
+    const AGG_OPTS = [
+      ['first', '— first'],
+      ['avg',   'Ø avg'],
+      ['sum',   'Σ sum'],
+      ['min',   '↓ min'],
+      ['max',   '↑ max'],
+      ['last',  '↙ last'],
+    ];
+
+    _columns.forEach(col => {
+      const item = document.createElement('div');
+      item.className = 'manual-col-item';
+
+      const cb = document.createElement('input');
+      cb.type = 'checkbox';
+      cb.value = col.field;
+      cb.checked = (group.columns || []).includes(col.field);
+
+      const nameSpan = document.createElement('span');
+      nameSpan.textContent = col.headerName || col.field;
+      nameSpan.style.flex = '1';
+
+      const aggSel = document.createElement('select');
+      aggSel.className = 'manual-agg-sel';
+      AGG_OPTS.forEach(([v, t]) => {
+        const o = document.createElement('option');
+        o.value = v; o.textContent = t;
+        o.selected = (group.colAgg[col.field] || 'first') === v;
+        aggSel.appendChild(o);
+      });
+      aggSel.style.display = cb.checked ? '' : 'none';
+      aggSel.onchange = (e) => { group.colAgg[col.field] = e.target.value; };
+
+      cb.onchange = () => {
+        if (cb.checked) {
+          if (!group.columns.includes(col.field)) group.columns.push(col.field);
+        } else {
+          group.columns = group.columns.filter(f => f !== col.field);
+          delete group.colAgg[col.field];
+        }
+        aggSel.style.display = cb.checked ? '' : 'none';
+      };
+
+      item.append(cb, nameSpan, aggSel);
+      colsWrap.appendChild(item);
+    });
+
+    wrap.append(delBtn, rangeWrap, colsWrap);
+    return wrap;
+  }
+
   // ── Columns render ─────────────────────────────────────────────────────
 
   function _renderColumns() {
     const container = document.getElementById('disp-columns-list');
     container.innerHTML = '';
     _columns.forEach(col => {
-      if (!_config.columns[col.field]) _config.columns[col.field] = { aliases: {}, rules: [] };
+      if (!_config.columns[col.field]) _config.columns[col.field] = _colDefault();
+      else {
+        const c = _config.columns[col.field];
+        if (!c.numberFormat) c.numberFormat = _colDefault().numberFormat;
+        if (c.align === undefined) c.align = 'center';
+      }
       container.appendChild(_buildColSection(col));
     });
   }
 
   function _buildColSection(col) {
+    const cfg = _config.columns[col.field];
     const section = document.createElement('div');
     section.className = 'disp-col-section';
 
-    // Header / toggle
+    // ── Header row ──
     const header = document.createElement('div');
     header.className = 'disp-col-header';
 
@@ -285,23 +469,97 @@ const DisplayConfig = (() => {
     const title = document.createElement('span');
     title.className = 'disp-col-title';
     title.textContent = col.field;
+    title.style.flex = '1';
+
+    // Visibility toggle in header
+    const visLabel = document.createElement('label');
+    visLabel.className = 'col-vis-label';
+    visLabel.title = 'Show / hide column';
+    const visCb = document.createElement('input');
+    visCb.type = 'checkbox';
+    visCb.checked = !cfg.hidden;
+    visCb.onchange = (e) => {
+      cfg.hidden = !e.target.checked;
+      section.classList.toggle('col-hidden-preview', cfg.hidden);
+    };
+    visLabel.append(visCb, document.createTextNode(' Show'));
+    section.classList.toggle('col-hidden-preview', !!cfg.hidden);
 
     const body = document.createElement('div');
     body.className = 'disp-col-body hidden';
 
     toggle.onclick = () => {
-      const open = body.classList.toggle('hidden');
+      body.classList.toggle('hidden');
       toggle.textContent = body.classList.contains('hidden') ? '▶' : '▼';
     };
+    header.onclick = (e) => {
+      if (e.target === visCb || e.target === visLabel || visLabel.contains(e.target)) return;
+      toggle.click();
+    };
 
-    header.append(toggle, title);
+    header.append(toggle, title, visLabel);
 
-    // Aliases
-    const aliasSection = _buildAliasSection(col.field);
-    // Conditional formatting
-    const rulesSection = _buildRulesSection(col.field);
+    // ── Style row (alignment) ──
+    const styleWrap = document.createElement('div');
+    styleWrap.className = 'col-style-row';
 
-    body.append(aliasSection, rulesSection);
+    const alignLabel = document.createElement('span');
+    alignLabel.className = 'disp-sub-label';
+    alignLabel.style.cssText = 'margin-bottom:0;align-self:center';
+    alignLabel.textContent = 'Align';
+
+    const alignSel = document.createElement('select');
+    alignSel.className = 'col-align-select';
+    [['left','← Left'],['center','↔ Center'],['right','→ Right']].forEach(([v, t]) => {
+      const o = document.createElement('option');
+      o.value = v; o.textContent = t; o.selected = (cfg.align || 'center') === v;
+      alignSel.appendChild(o);
+    });
+    alignSel.onchange = (e) => { cfg.align = e.target.value; };
+
+    styleWrap.append(alignLabel, alignSel);
+
+    // ── Number format ──
+    const nfWrap = document.createElement('div');
+    nfWrap.className = 'col-nf-row';
+
+    const nfLabel = document.createElement('span');
+    nfLabel.className = 'disp-sub-label';
+    nfLabel.style.cssText = 'margin-bottom:0;align-self:center;white-space:nowrap';
+    nfLabel.textContent = 'Number format';
+
+    const nf = cfg.numberFormat;
+
+    const decInput = document.createElement('input');
+    decInput.type = 'number'; decInput.min = 0; decInput.max = 6;
+    decInput.className = 'col-nf-input'; decInput.placeholder = 'dec';
+    decInput.title = 'Decimal places (leave empty for default)';
+    decInput.value = nf.decimals ?? '';
+    decInput.oninput = (e) => { nf.decimals = e.target.value === '' ? '' : Math.max(0, parseInt(e.target.value)); };
+
+    const sepLabel = document.createElement('label');
+    sepLabel.className = 'col-nf-check-label'; sepLabel.title = 'Thousands separator';
+    const sepCb = document.createElement('input');
+    sepCb.type = 'checkbox'; sepCb.checked = !!nf.thousandsSep;
+    sepCb.onchange = (e) => { nf.thousandsSep = e.target.checked; };
+    sepLabel.append(sepCb, document.createTextNode(' 1 000'));
+
+    const prefixInput = document.createElement('input');
+    prefixInput.type = 'text'; prefixInput.className = 'col-nf-input col-nf-affix';
+    prefixInput.placeholder = 'prefix'; prefixInput.title = 'Prefix (e.g. $, €)';
+    prefixInput.value = nf.prefix || '';
+    prefixInput.oninput = (e) => { nf.prefix = e.target.value; };
+
+    const suffixInput = document.createElement('input');
+    suffixInput.type = 'text'; suffixInput.className = 'col-nf-input col-nf-affix';
+    suffixInput.placeholder = 'suffix'; suffixInput.title = 'Suffix (e.g. %, руб)';
+    suffixInput.value = nf.suffix || '';
+    suffixInput.oninput = (e) => { nf.suffix = e.target.value; };
+
+    nfWrap.append(nfLabel, decInput, sepLabel, prefixInput, suffixInput);
+
+    // ── Aliases + rules ──
+    body.append(styleWrap, nfWrap, _buildAliasSection(col.field), _buildRulesSection(col.field));
     section.append(header, body);
     return section;
   }

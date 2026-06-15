@@ -34,8 +34,7 @@ const Table = (() => {
     });
   }
 
-  // Mark group boundaries and assign alternating group index
-  // Insert subtotal rows after each group boundary
+  // Insert subtotal rows after each group + optional grand total at bottom
   function _injectSubtotals(data, groupCols) {
     if (typeof DisplayConfig === 'undefined') return data;
     const st = DisplayConfig.getConfig().subtotals;
@@ -43,40 +42,47 @@ const Table = (() => {
 
     const ops = st.operations || {};
     const hasOps = Object.keys(ops).length > 0;
-    if (!hasOps) return data;
+    if (!hasOps && !st.showGrandTotal) return data;
 
-    // Determine which group column to subtotal after (use first group col)
     const groupCol = groupCols[0];
+
+    function _agg(rows) {
+      const out = {};
+      for (const [field, op] of Object.entries(ops)) {
+        const vals = rows.map(r => parseFloat(String(r[field] ?? '').replace(/[^0-9.\-]/g, ''))).filter(v => !isNaN(v));
+        if (!vals.length) { out[field] = ''; continue; }
+        switch (op) {
+          case 'sum':   out[field] = String(vals.reduce((a, b) => a + b, 0)); break;
+          case 'count': out[field] = String(vals.length); break;
+          case 'avg':   out[field] = String((vals.reduce((a, b) => a + b, 0) / vals.length).toFixed(2)); break;
+          case 'min':   out[field] = String(Math.min(...vals)); break;
+          case 'max':   out[field] = String(Math.max(...vals)); break;
+        }
+      }
+      return out;
+    }
 
     const result = [];
     let i = 0;
     while (i < data.length) {
       const groupVal = data[i][groupCol];
       const groupRows = [];
-      while (i < data.length && data[i][groupCol] === groupVal) {
-        groupRows.push(data[i]);
-        i++;
-      }
+      while (i < data.length && data[i][groupCol] === groupVal) { groupRows.push(data[i]); i++; }
       result.push(...groupRows);
-
-      // Build subtotal row
-      const subtotalRow = { _isSubtotal: true, _rowId: 'st_' + i };
-      // Label in first group column
-      subtotalRow[groupCol] = st.labelText || 'Итого';
-      // Compute aggregations
-      for (const [field, op] of Object.entries(ops)) {
-        const vals = groupRows.map(r => parseFloat(r[field])).filter(v => !isNaN(v));
-        if (!vals.length) { subtotalRow[field] = ''; continue; }
-        switch (op) {
-          case 'sum':   subtotalRow[field] = String(vals.reduce((a, b) => a + b, 0)); break;
-          case 'count': subtotalRow[field] = String(vals.length); break;
-          case 'avg':   subtotalRow[field] = String((vals.reduce((a, b) => a + b, 0) / vals.length).toFixed(2)); break;
-          case 'min':   subtotalRow[field] = String(Math.min(...vals)); break;
-          case 'max':   subtotalRow[field] = String(Math.max(...vals)); break;
-        }
+      if (hasOps) {
+        const st_row = Object.assign({ _isSubtotal: true, _rowId: 'st_' + i }, _agg(groupRows));
+        st_row[groupCol] = st.labelText || 'Итого';
+        result.push(st_row);
       }
-      result.push(subtotalRow);
     }
+
+    if (st.showGrandTotal) {
+      const allRaw = result.filter(r => !r._isSubtotal);
+      const gt = Object.assign({ _isSubtotal: true, _isGrandTotal: true, _rowId: 'grand_total' }, _agg(allRaw));
+      gt[groupCol] = st.grandTotalLabel || 'Grand Total';
+      result.push(gt);
+    }
+
     return result;
   }
 
@@ -106,14 +112,19 @@ const Table = (() => {
     });
   }
 
-  function buildColDefs(columns, groupCols) {
-    const dc = typeof DisplayConfig !== 'undefined' ? DisplayConfig.getConfig() : null;
-    const fitToWidth = dc?.fitToWidth ?? false;
+  function buildColDefs(columns, groupCols, manualMergeCols) {
+    const dc           = typeof DisplayConfig !== 'undefined' ? DisplayConfig.getConfig() : null;
+    const fitToWidth   = dc?.fitToWidth ?? false;
+    const frozenCount  = dc?.frozenColumns ?? 0;
 
-    return columns
+    const defs = columns
       .filter(col => !col.field.startsWith('_span_'))
       .map(col => {
-        const isGroup = groupCols.includes(col.field);
+        const isGroup  = groupCols.includes(col.field);
+        const isManual = manualMergeCols && manualMergeCols.has(col.field);
+        const isMerged = (isGroup || isManual) && !isSearchActive;
+        const colCfg   = dc?.columns?.[col.field];
+
         const def = {
           field: col.field,
           headerName: col.headerName,
@@ -123,18 +134,13 @@ const Table = (() => {
           minWidth: 80,
         };
 
-        if (fitToWidth) {
-          def.flex = 1;
-        } else {
-          def.width = 180;
-        }
+        if (fitToWidth) def.flex = 1;
+        else            def.width = 180;
 
-        // Value aliases
-        if (dc) {
-          def.valueFormatter = DisplayConfig.makeValueFormatter(col.field);
-        }
+        if (colCfg?.hidden) def.hide = true;
+        if (dc)             def.valueFormatter = DisplayConfig.makeValueFormatter(col.field);
 
-        if (isGroup && !isSearchActive) {
+        if (isMerged) {
           def.rowSpan = (params) => {
             const span = params.data?.['_span_' + col.field];
             return span === 0 ? 1 : (span ?? 1);
@@ -145,12 +151,9 @@ const Table = (() => {
           def.cellStyle = (params) => {
             const span = params.data?.['_span_' + col.field];
             if (span === 0) return { opacity: 0, pointerEvents: 'none', borderBottom: 'none' };
-            // Apply conditional formatting on visible grouped cells
-            if (dc) return DisplayConfig.makeCellStyle(col.field)(params);
-            return { textAlign: 'center' };
+            return dc ? DisplayConfig.makeCellStyle(col.field)(params) : { textAlign: 'center' };
           };
         } else {
-          // Conditional formatting for regular cells
           def.cellStyle = dc
             ? DisplayConfig.makeCellStyle(col.field)
             : { textAlign: 'center' };
@@ -158,6 +161,62 @@ const Table = (() => {
 
         return def;
       });
+
+    // Apply left freeze to first N visible columns
+    if (frozenCount > 0) {
+      let pinned = 0;
+      for (const def of defs) {
+        if (!def.hide && pinned < frozenCount) { def.pinned = 'left'; pinned++; }
+      }
+    }
+
+    return defs;
+  }
+
+  function _applyManualMerges(data, groups) {
+    if (!groups?.length) return;
+    groups.forEach(group => {
+      const start  = group.rowStart;
+      const end    = Math.min(group.rowEnd, data.length - 1);
+      if (start < 0 || start >= data.length || end <= start) return;
+      const span   = end - start + 1;
+      const colAgg = group.colAgg || {};
+
+      (group.columns || []).forEach(col => {
+        const agg = colAgg[col] || 'first';
+        if (agg !== 'first') {
+          const vals = [];
+          for (let i = start; i <= end; i++) {
+            const v = parseFloat(String(data[i][col] ?? '').replace(/[^0-9.\-]/g, ''));
+            if (!isNaN(v)) vals.push(v);
+          }
+          if (vals.length) {
+            let result;
+            switch (agg) {
+              case 'sum':  result = vals.reduce((a, b) => a + b, 0); break;
+              case 'avg':  result = vals.reduce((a, b) => a + b, 0) / vals.length; break;
+              case 'min':  result = Math.min(...vals); break;
+              case 'max':  result = Math.max(...vals); break;
+              case 'last': result = vals[vals.length - 1]; break;
+              default:     result = vals[0];
+            }
+            data[start][col] = String(+result.toFixed(6));
+          }
+        }
+        data[start]['_span_' + col] = span;
+        for (let i = start + 1; i <= end; i++) {
+          data[i]['_span_' + col] = 0;
+        }
+      });
+    });
+  }
+
+  function _getManualMergeColSet() {
+    if (typeof DisplayConfig === 'undefined') return new Set();
+    const groups = DisplayConfig.getConfig().manualMergeGroups || [];
+    const cols = new Set();
+    groups.forEach(g => (g.columns || []).forEach(c => cols.add(c)));
+    return cols;
   }
 
   function init() {
@@ -203,6 +262,8 @@ const Table = (() => {
         _sortData(rawData);
         currentData = _injectSubtotals(rawData, currentGroupCols);
         calcSpans(currentData, currentGroupCols);
+        const manualGroups = typeof DisplayConfig !== 'undefined' ? DisplayConfig.getConfig().manualMergeGroups : null;
+        _applyManualMerges(currentData, manualGroups);
         markGroupBoundaries(currentData, currentGroupCols);
         gridApi.setGridOption('rowData', currentData);
         _updateRowCount();
@@ -220,15 +281,20 @@ const Table = (() => {
 
     // Stamp stable row IDs once (needed for getRowId)
     data.forEach((row, i) => { row._rowId = i; });
+    isSearchActive = false;
+    gridApi.setGridOption('quickFilterText', '');
 
-    // Heavy processing — sort → subtotals → spans → boundaries
+    // Heavy processing — sort → subtotals → spans → manual merges → boundaries
     _sortData(currentData);
     currentData = _injectSubtotals(currentData, currentGroupCols);
     calcSpans(currentData, currentGroupCols);
+    const manualGroups = typeof DisplayConfig !== 'undefined' ? DisplayConfig.getConfig().manualMergeGroups : null;
+    _applyManualMerges(currentData, manualGroups);
     markGroupBoundaries(currentData, currentGroupCols);
 
     // Build column defs
-    let colDefs = buildColDefs(currentColumns, currentGroupCols);
+    const manualMergeCols = _getManualMergeColSet();
+    let colDefs = buildColDefs(currentColumns, currentGroupCols, manualMergeCols);
     if (typeof HeaderConfig !== 'undefined') colDefs = HeaderConfig.applyToColDefs(colDefs);
 
     // Apply display settings (font, separators)
@@ -242,19 +308,28 @@ const Table = (() => {
     }
 
     gridApi.setGridOption('groupHeaderHeight', 36);
-    const subtotalBg  = DisplayConfig?.getConfig?.()?.subtotals?.bgColor  ?? '#e8f0fe';
-    const subtotalTxt = DisplayConfig?.getConfig?.()?.subtotals?.textColor ?? '#1a237e';
-    const container = document.getElementById('grid-container');
-    container.style.setProperty('--subtotal-bg',  subtotalBg);
-    container.style.setProperty('--subtotal-txt', subtotalTxt);
+
+    if (typeof DisplayConfig !== 'undefined') {
+      const dc = DisplayConfig.getConfig();
+      const rh = dc.rowHeight || 32;
+      gridApi.setGridOption('rowHeight', rh);
+      gridApi.resetRowHeights();
+
+      const container = document.getElementById('grid-container');
+      const subtotalBg  = dc.subtotals?.bgColor  ?? '#e8f0fe';
+      const subtotalTxt = dc.subtotals?.textColor ?? '#1a237e';
+      container.style.setProperty('--subtotal-bg',  subtotalBg);
+      container.style.setProperty('--subtotal-txt', subtotalTxt);
+    }
 
     gridApi.setGridOption('rowClassRules', {
       'group-boundary':     (p) => p.data?._groupStart === true,
       'sub-group-boundary': (p) => p.data?._subGroupStart === true,
-      'group-even':     (p) => !p.data?._isSubtotal && p.data?._groupIndex % 2 === 0,
-      'group-odd':      (p) => !p.data?._isSubtotal && p.data?._groupIndex % 2 === 1,
-      'subtotal-row':   (p) => !!p.data?._isSubtotal,
-      'sticky-group-row': (p) => !!p.data?._isStickyHeader,
+      'group-even':         (p) => !p.data?._isSubtotal && p.data?._groupIndex % 2 === 0,
+      'group-odd':          (p) => !p.data?._isSubtotal && p.data?._groupIndex % 2 === 1,
+      'subtotal-row':       (p) => !!p.data?._isSubtotal && !p.data?._isGrandTotal,
+      'grand-total-row':    (p) => !!p.data?._isGrandTotal,
+      'sticky-group-row':   (p) => !!p.data?._isStickyHeader,
     });
     gridApi.setGridOption('columnDefs', colDefs);
     gridApi.setGridOption('rowData', currentData);
@@ -327,7 +402,9 @@ const Table = (() => {
 
     // Rebuild column defs if search state changed (to toggle rowSpan)
     if (wasActive !== isSearchActive) {
-      const colDefs = buildColDefs(currentColumns, currentGroupCols);
+      const manualMergeCols = _getManualMergeColSet();
+      let colDefs = buildColDefs(currentColumns, currentGroupCols, manualMergeCols);
+      if (typeof HeaderConfig !== 'undefined') colDefs = HeaderConfig.applyToColDefs(colDefs);
       gridApi.setGridOption('columnDefs', colDefs);
     }
 
@@ -341,6 +418,30 @@ const Table = (() => {
       if (node.data && !node.data._isSubtotal) visibleRows.push(node.data);
     });
     Utils.exportCSV(visibleRows, currentColumns);
+  }
+
+  function copyToClipboard() {
+    const visibleCols = gridApi.getAllDisplayedColumns()
+      .map(c => c.getColId())
+      .filter(id => !id.startsWith('_span_'));
+
+    const headerRow = visibleCols
+      .map(id => { const col = currentColumns.find(c => c.field === id); return col?.headerName || id; })
+      .join('\t');
+
+    const rows = [];
+    gridApi.forEachNodeAfterFilter(node => { if (node.data) rows.push(node.data); });
+
+    const dataRows = rows.map(row => visibleCols.map(id => {
+      const val = row[id] ?? '';
+      return String(val).replace(/\t/g, ' ').replace(/\n/g, ' ');
+    }).join('\t'));
+
+    const tsv = [headerRow, ...dataRows].join('\n');
+    navigator.clipboard.writeText(tsv).then(() => {
+      const btn = document.getElementById('btn-copy-clipboard');
+      if (btn) { const orig = btn.textContent; btn.textContent = '✓ Copied'; setTimeout(() => { btn.textContent = orig; }, 1500); }
+    }).catch(() => {});
   }
 
   function destroy() {
@@ -362,5 +463,5 @@ const Table = (() => {
     if (el) el.textContent = count > 0 ? `${count} rows` : '';
   }
 
-  return { init, render, search, exportCSV, destroy };
+  return { init, render, search, exportCSV, copyToClipboard, destroy };
 })();

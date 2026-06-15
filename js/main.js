@@ -1,39 +1,39 @@
 const App = {
   worksheet: null,
-  allColumns: [],   // all columns from last data load
-  groupFields: [],  // columns to merge (saved in localStorage)
+  worksheets: [],
+  allColumns: [],
+  groupFields: [],
 };
 
-const STORAGE_KEY = 'advtable_group_fields';
+const STORAGE_KEY      = 'advtable_group_fields';
+const STORAGE_WS_KEY   = 'advtable_worksheet';
 
 document.addEventListener('DOMContentLoaded', () => {
   Table.init();
   Config.init(_onConfigSave);
   HeaderConfig.init(_onHeaderConfigSave);
   DisplayConfig.init(_onDisplayConfigSave);
+  ComputedColumns.init(_onComputedColsSave);
+  Palettes.load();
   _bindToolbar();
   Utils.showLoading();
 
   tableau.extensions.initializeAsync().then(() => {
-    App.worksheet = tableau.extensions.worksheetContent.worksheet;
+    const dashboard = tableau.extensions.dashboardContent.dashboard;
+    App.worksheets = dashboard.worksheets;
 
-    App.worksheet.addEventListener(tableau.TableauEventType.FilterChanged, _onDataChanged);
-    App.worksheet.addEventListener(tableau.TableauEventType.MarkSelectionChanged, _onDataChanged);
+    if (!App.worksheets.length) {
+      Utils.showError('No worksheets found. Add at least one worksheet to the dashboard.');
+      return;
+    }
+
+    // Restore saved worksheet selection
+    const savedWsName = localStorage.getItem(STORAGE_WS_KEY);
+    App.worksheet = App.worksheets.find(ws => ws.name === savedWsName) || App.worksheets[0];
 
     _applyModeRestrictions();
-
-    // Find and register encoding changed event
-    _registerEncodingListener();
-
-
-    // Load saved settings
-    try {
-      const saved = localStorage.getItem(STORAGE_KEY + '_' + App.worksheet.name);
-      if (saved) App.groupFields = JSON.parse(saved);
-    } catch (e) {}
-    HeaderConfig.load(App.worksheet.name);
-    DisplayConfig.load(App.worksheet.name);
-
+    _registerListeners();
+    _loadSavedSettings();
     _loadData();
 
   }).catch(err => {
@@ -41,61 +41,47 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 });
 
-// Debounce — avoid multiple rapid reloads on filter/param changes
+function _loadSavedSettings() {
+  try {
+    const saved = localStorage.getItem(STORAGE_KEY + '_' + App.worksheet.name);
+    if (saved) App.groupFields = JSON.parse(saved);
+    else App.groupFields = [];
+  } catch (e) { App.groupFields = []; }
+  HeaderConfig.load(App.worksheet.name);
+  DisplayConfig.load(App.worksheet.name);
+  ComputedColumns.load(App.worksheet.name);
+}
+
+function _onComputedColsSave() {
+  ComputedColumns.save(App.worksheet?.name ?? 'default');
+  _loadData();
+}
+
+// ── Event listeners ────────────────────────────────────────────────────────
+
+let _currentListeners = [];
+
+function _registerListeners() {
+  // Unregister previous listeners when switching worksheets
+  _currentListeners.forEach(u => { try { u(); } catch(e) {} });
+  _currentListeners = [];
+
+  const unsubFilter = App.worksheet.addEventListener(
+    tableau.TableauEventType.FilterChanged, _onDataChanged
+  );
+  const unsubMark = App.worksheet.addEventListener(
+    tableau.TableauEventType.MarkSelectionChanged, _onDataChanged
+  );
+  _currentListeners.push(unsubFilter, unsubMark);
+}
+
 let _reloadTimer = null;
 function _onDataChanged() {
   clearTimeout(_reloadTimer);
   _reloadTimer = setTimeout(_loadData, 300);
 }
 
-function _registerEncodingListener() {
-  // Try known event type names for encoding changes
-  const candidates = [
-    'VizExtensionEncodingChanged',
-    'vizExtensionEncodingChanged',
-    'EncodingChanged',
-    'encodingChanged',
-  ];
-
-  let registered = false;
-  for (const name of candidates) {
-    try {
-      const eventType = tableau.TableauEventType[name] ?? name;
-      App.worksheet.addEventListener(eventType, _onDataChanged);
-      console.log('[AdvTable] Encoding listener registered:', name);
-      registered = true;
-      break;
-    } catch (e) {
-      // try next
-    }
-  }
-
-  if (!registered) {
-    console.warn('[AdvTable] No encoding event found, using column-count polling');
-    _startColumnPolling();
-  }
-}
-
-// Fallback: poll every 3s for column count changes (only if encoding events unavailable)
-let _lastColumnCount = 0;
-let _pollTimer = null;
-
-function _startColumnPolling() {
-  if (_pollTimer) return;
-  _pollTimer = setInterval(async () => {
-    try {
-      const dt = await App.worksheet.getSummaryDataAsync({ maxRows: 1, includeAllColumns: true });
-      if (dt.columns.length !== _lastColumnCount) {
-        _lastColumnCount = dt.columns.length;
-        _onDataChanged();
-      }
-    } catch (e) { /* ignore */ }
-  }, 3000);
-}
-
-function _stopPolling() {
-  if (_pollTimer) { clearInterval(_pollTimer); _pollTimer = null; }
-}
+// ── Config callbacks ───────────────────────────────────────────────────────
 
 function _onDisplayConfigSave() {
   DisplayConfig.save(App.worksheet?.name ?? 'default');
@@ -107,13 +93,32 @@ function _onHeaderConfigSave() {
   Table.render(App._lastData, App._lastColumns, App.groupFields);
 }
 
-function _onConfigSave(groupFields) {
+function _onConfigSave(worksheetName, groupFields) {
+  const wsChanged = worksheetName !== App.worksheet.name;
+
+  if (wsChanged) {
+    const ws = App.worksheets.find(w => w.name === worksheetName);
+    if (ws) {
+      App.worksheet = ws;
+      localStorage.setItem(STORAGE_WS_KEY, ws.name);
+      _registerListeners();
+      _loadSavedSettings();
+    }
+  }
+
   App.groupFields = groupFields;
   try {
     localStorage.setItem(STORAGE_KEY + '_' + App.worksheet.name, JSON.stringify(groupFields));
   } catch (e) {}
-  Table.render(App._lastData, App._lastColumns, App.groupFields);
+
+  if (wsChanged) {
+    _loadData();
+  } else {
+    Table.render(App._lastData, App._lastColumns, App.groupFields);
+  }
 }
+
+// ── Data loading ───────────────────────────────────────────────────────────
 
 async function _loadData() {
   Utils.showLoading();
@@ -124,10 +129,10 @@ async function _loadData() {
     });
 
     const { columns, data } = Utils.parseTableauData(dataTable);
+    ComputedColumns.applyToData(data, columns);
     App.allColumns   = columns;
     App._lastData    = data;
     App._lastColumns = columns;
-    _lastColumnCount = columns.length;
 
     document.getElementById('search-input').value = '';
     Table.render(data, columns, App.groupFields);
@@ -138,6 +143,8 @@ async function _loadData() {
   }
 }
 
+// ── Toolbar ────────────────────────────────────────────────────────────────
+
 function _bindToolbar() {
   document.getElementById('search-input').addEventListener('input', (e) => {
     Table.search(e.target.value);
@@ -147,8 +154,20 @@ function _bindToolbar() {
     Table.exportCSV();
   });
 
+  document.getElementById('btn-copy-clipboard').addEventListener('click', () => {
+    Table.copyToClipboard();
+  });
+
+  document.getElementById('btn-computed-cols').addEventListener('click', () => {
+    ComputedColumns.open(App.allColumns, App.worksheet?.name ?? 'default');
+  });
+
+  document.getElementById('btn-palettes').addEventListener('click', () => {
+    Palettes.openManager();
+  });
+
   document.getElementById('btn-settings').addEventListener('click', () => {
-    Config.open(App.allColumns, App.groupFields);
+    Config.open(App.worksheets, App.worksheet?.name, App.allColumns, App.groupFields);
   });
 
   document.getElementById('btn-header-config').addEventListener('click', () => {
@@ -156,7 +175,7 @@ function _bindToolbar() {
   });
 
   document.getElementById('btn-display').addEventListener('click', () => {
-    DisplayConfig.open(App.allColumns, App.worksheet?.name ?? 'default');
+    DisplayConfig.open(App.allColumns, App.worksheet?.name ?? 'default', App._lastData?.length ?? 0);
   });
 
   document.getElementById('btn-open-settings-error').style.display = 'none';
@@ -164,9 +183,7 @@ function _bindToolbar() {
 
 function _applyModeRestrictions() {
   try {
-    const env  = tableau.extensions.environment;
-    const mode = env?.mode ?? '';
-    // In viewing mode hide all editing controls
+    const mode = tableau.extensions.environment?.mode ?? '';
     const isViewing = mode === 'viewing'
       || mode === tableau.ExtensionMode?.Viewing
       || mode === 'view';
@@ -174,7 +191,5 @@ function _applyModeRestrictions() {
     document.getElementById('btn-settings').style.display      = isViewing ? 'none' : '';
     document.getElementById('btn-header-config').style.display = isViewing ? 'none' : '';
     document.getElementById('btn-display').style.display       = isViewing ? 'none' : '';
-  } catch (e) {
-    // If API doesn't support environment, default to showing all buttons
-  }
+  } catch (e) {}
 }
