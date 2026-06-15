@@ -112,11 +112,11 @@ button:hover {
 
 /* Alternating group background colors */
 .ag-row.group-even .ag-cell {
-  background-color: #ffffff !important;
+  background-color: #ffffff;
 }
 
 .ag-row.group-odd .ag-cell {
-  background-color: #eef2f8 !important;
+  background-color: #eef2f8;
 }
 
 /* Sticky group header row (pinned top) */
