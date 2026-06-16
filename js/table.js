@@ -513,6 +513,17 @@ const Table = (() => {
     document.body.removeChild(ta);
   }
 
+  // Expose the processed view (sorted + subtotals + spans) for export.
+  // _span_<field> on rows carries vertical-merge info (N = span height, 0 = covered).
+  function getExportModel() {
+    return {
+      data: currentData,
+      columns: currentColumns,
+      groupCols: currentGroupCols,
+      mergeCols: _getManualMergeColSet(),  // group cols + manual-merge cols all use _span_
+    };
+  }
+
   function destroy() {
     if (gridApi) {
       gridApi.destroy();
@@ -527,5 +538,5 @@ const Table = (() => {
     if (el) el.textContent = count > 0 ? `${count} rows` : '';
   }
 
-  return { init, render, search, exportCSV, copyToClipboard, destroy };
+  return { init, render, search, exportCSV, copyToClipboard, getExportModel, destroy };
 })();

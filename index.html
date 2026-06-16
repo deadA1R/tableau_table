@@ -13,6 +13,9 @@
   <!-- Tableau Extensions API (hosted locally) -->
   <script src="js/tableau.extensions.1.latest.js"></script>
 
+  <!-- ExcelJS (hosted locally) — Excel export -->
+  <script src="js/exceljs.min.js"></script>
+
   <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
@@ -27,7 +30,7 @@
       </div>
       <div id="toolbar-right">
         <button id="btn-copy-clipboard" title="Copy visible rows to clipboard (TSV for Excel)">&#128203; Copy</button>
-        <button id="btn-export-csv" title="Export to CSV">&#8595; CSV</button>
+        <button id="btn-export" title="Export to Excel / CSV">&#8595; Export</button>
         <button id="btn-computed-cols" title="Computed columns">&#931; Computed</button>
         <button id="btn-palettes" title="Color palettes">&#9783; Palettes</button>
         <button id="btn-display" title="Display settings">&#9724; Display</button>
@@ -181,6 +184,43 @@
       </div>
     </div>
 
+    <!-- Export Modal -->
+    <div id="export-modal" class="modal hidden">
+      <div class="modal-backdrop"></div>
+      <div class="modal-content">
+        <h2>Export</h2>
+
+        <div class="form-group">
+          <label>Format</label>
+          <div class="export-format-row">
+            <label class="export-radio"><input type="radio" name="export-format" value="xlsx" checked> Excel (.xlsx)</label>
+            <label class="export-radio"><input type="radio" name="export-format" value="csv"> CSV</label>
+          </div>
+        </div>
+
+        <div class="form-group" id="export-xlsx-opts">
+          <label>Excel options</label>
+          <label class="export-opt"><input type="checkbox" id="export-styled-header" checked> Grouped headers &amp; colors</label>
+          <label class="export-opt"><input type="checkbox" id="export-merge-cells" checked> Merge repeated cells vertically</label>
+        </div>
+
+        <div class="form-group">
+          <label>
+            Columns
+            <button id="export-select-all"  class="tree-btn" style="margin-left:8px;font-size:11px;font-weight:normal">All</button>
+            <button id="export-select-none" class="tree-btn" style="font-size:11px;font-weight:normal">None</button>
+          </label>
+          <div class="hint" style="margin:-2px 0 6px;font-weight:normal">«Список» — выпадающий выбор из значений колонки (только для категорий, строго из списка)</div>
+          <div id="export-columns-list" class="export-columns-list"></div>
+        </div>
+
+        <div class="modal-buttons">
+          <button id="btn-do-export" class="btn-primary">Export</button>
+          <button id="btn-cancel-export" class="btn-secondary">Cancel</button>
+        </div>
+      </div>
+    </div>
+
     <!-- Config Modal -->
     <div id="config-modal" class="modal hidden">
       <div class="modal-backdrop"></div>
@@ -213,6 +253,7 @@
   <script src="js/config.js"></script>
   <script src="js/headerConfig.js"></script>
   <script src="js/displayConfig.js"></script>
+  <script src="js/exportData.js"></script>
   <script src="js/main.js"></script>
 
 </body>
