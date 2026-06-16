@@ -1103,6 +1103,48 @@ button:hover {
 }
 .cc-expr-ta:focus { border-color: #1f77b4; }
 
+/* ── Export modal ── */
+.export-format-row {
+  display: flex;
+  gap: 18px;
+}
+
+.export-radio,
+.export-opt {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: normal;
+  text-transform: none;
+  letter-spacing: 0;
+  color: #444;
+  cursor: pointer;
+}
+
+.export-opt { margin-bottom: 4px; }
+
+.export-columns-list {
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  max-height: 260px;
+  overflow-y: auto;
+  padding: 4px;
+}
+
+.export-col-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 8px;
+  font-size: 13px;
+  color: #333;
+  cursor: pointer;
+  border-radius: 3px;
+}
+
+.export-col-item:hover { background: #f5f8ff; }
+
 /* ── Palettes ── */
 .pal-picker-popup {
   position: fixed;

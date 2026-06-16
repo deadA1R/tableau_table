@@ -14,6 +14,7 @@ document.addEventListener('DOMContentLoaded', () => {
   HeaderConfig.init(_onHeaderConfigSave);
   DisplayConfig.init(_onDisplayConfigSave);
   ComputedColumns.init(_onComputedColsSave);
+  ExportData.init();
   Palettes.load();
   _bindToolbar();
   Utils.showLoading();
@@ -161,8 +162,8 @@ function _bindToolbar() {
     Table.search(e.target.value);
   });
 
-  document.getElementById('btn-export-csv').addEventListener('click', () => {
-    Table.exportCSV();
+  document.getElementById('btn-export').addEventListener('click', () => {
+    ExportData.open(App.allColumns, App.worksheet?.name ?? 'default');
   });
 
   document.getElementById('btn-copy-clipboard').addEventListener('click', () => {
