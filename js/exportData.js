@@ -2,6 +2,9 @@ const ExportData = (() => {
   let _columns = [];        // App.allColumns
   let _wsName  = 'default';
 
+  const LIST_THRESHOLD = 200;   // max distinct values for a column to allow a dropdown
+  let _colMeta = {};            // field -> { numeric, tooMany, distinctCount, eligible, values }
+
   // ── Public ─────────────────────────────────────────────────────────────
 
   function init() {
@@ -43,33 +46,114 @@ const ExportData = (() => {
 
   function _renderColumns() {
     const dc = typeof DisplayConfig !== 'undefined' ? DisplayConfig.getConfig() : null;
+    const model = (typeof Table !== 'undefined' && Table.getExportModel) ? Table.getExportModel() : { data: [] };
+    _colMeta = _computeColMeta(model.data || []);
+
     const list = document.getElementById('export-columns-list');
     list.innerHTML = '';
     _columns.forEach(col => {
       if (col.field.startsWith('_')) return;
+      const meta   = _colMeta[col.field] || {};
       const hidden = dc?.columns?.[col.field]?.hidden;
-      const item = document.createElement('label');
-      item.className = 'export-col-item';
 
-      const cb = document.createElement('input');
-      cb.type = 'checkbox';
-      cb.value = col.field;
-      cb.checked = !hidden;       // default: currently-visible columns
+      const row = document.createElement('div');
+      row.className = 'export-col-item';
 
+      // include checkbox + name
+      const incLabel = document.createElement('label');
+      incLabel.className = 'export-col-inc';
+      const inc = document.createElement('input');
+      inc.type = 'checkbox';
+      inc.className = 'export-inc-cb';
+      inc.value = col.field;
+      inc.checked = !hidden;        // default: currently-visible columns
       const name = document.createElement('span');
       name.textContent = _displayName(col.field, col.headerName);
+      incLabel.append(inc, name);
 
-      item.append(cb, name);
-      list.appendChild(item);
+      // cardinality / type hint
+      const info = document.createElement('span');
+      info.className = 'export-col-meta';
+      if (meta.numeric)                info.textContent = 'число';
+      else if (meta.tooMany)           info.textContent = '> ' + LIST_THRESHOLD + ' знач.';
+      else if (meta.distinctCount > 0) info.textContent = meta.distinctCount + ' знач.';
+      else                             info.textContent = '—';
+
+      row.append(incLabel, info);
+
+      // dropdown toggle — only categorical, low-cardinality columns
+      if (meta.eligible) {
+        const listLabel = document.createElement('label');
+        listLabel.className = 'export-list-toggle';
+        listLabel.title = 'Выпадающий список из значений этой колонки (строго из списка, на всю колонку)';
+        const lcb = document.createElement('input');
+        lcb.type = 'checkbox';
+        lcb.className = 'export-list-cb';
+        lcb.value = col.field;
+        lcb.disabled = !inc.checked;
+        listLabel.append(lcb, document.createTextNode(' Список'));
+        inc.onchange = () => { lcb.disabled = !inc.checked; if (!inc.checked) lcb.checked = false; };
+        row.append(listLabel);
+      }
+
+      list.appendChild(row);
     });
   }
 
   function _setAll(state) {
-    document.querySelectorAll('#export-columns-list input[type=checkbox]').forEach(cb => { cb.checked = state; });
+    document.querySelectorAll('#export-columns-list .export-inc-cb').forEach(cb => {
+      cb.checked = state;
+      cb.dispatchEvent(new Event('change'));
+    });
   }
 
   function _selectedFields() {
-    return [...document.querySelectorAll('#export-columns-list input[type=checkbox]:checked')].map(cb => cb.value);
+    return [...document.querySelectorAll('#export-columns-list .export-inc-cb:checked')].map(cb => cb.value);
+  }
+
+  function _dropdownFields() {
+    return [...document.querySelectorAll('#export-columns-list .export-list-cb:checked')].map(cb => cb.value);
+  }
+
+  // Per-column type + distinct-value analysis (categorical detection for dropdowns).
+  function _computeColMeta(data) {
+    const meta = {};
+    const fields = [];
+    _columns.forEach(c => {
+      if (c.field.startsWith('_')) return;
+      meta[c.field] = { set: new Set(), tooMany: false, seen: 0, num: 0 };
+      fields.push(c.field);
+    });
+
+    for (let r = 0; r < data.length; r++) {
+      const row = data[r];
+      if (row._isSubtotal) continue;
+      for (let k = 0; k < fields.length; k++) {
+        const f = fields[k], m = meta[f];
+        const v = row[f];
+        if (v === null || v === undefined) continue;
+        const s = String(v).trim();
+        if (!s || s === '-' || /^null$/i.test(s)) continue;   // treat as blank
+        if (m.seen < 400) { m.seen++; if (_isNum(s)) m.num++; }
+        if (!m.tooMany) {
+          m.set.add(s);
+          if (m.set.size > LIST_THRESHOLD) { m.tooMany = true; m.set = null; }  // free memory
+        }
+      }
+    }
+
+    const out = {};
+    fields.forEach(f => {
+      const m = meta[f];
+      const numeric = m.seen > 0 && m.num === m.seen;
+      const distinctCount = m.tooMany ? Infinity : (m.set ? m.set.size : 0);
+      const eligible = !numeric && !m.tooMany && distinctCount > 0;
+      out[f] = {
+        numeric, tooMany: m.tooMany, distinctCount, eligible,
+        values: eligible ? [...m.set].sort((a, b) => a.localeCompare(b, 'ru')) : [],
+      };
+    });
+    return out;
   }
 
   // ── Run ────────────────────────────────────────────────────────────────
@@ -207,6 +291,33 @@ const ExportData = (() => {
           if (isTotal) _styleTotalCell(cell, stBg, stTxt, row._isGrandTotal);
         }
       }
+    }
+
+    // ── Dropdown (data-validation) columns ──
+    // Whole-column list validation so newly added rows also get the dropdown.
+    // Option values live on a hidden "Lists" sheet; entries are restricted to the list.
+    const dropdownFields = _dropdownFields().filter(f => leaves.includes(f) && _colMeta[f]?.values?.length);
+    if (dropdownFields.length) {
+      const listSheet = wb.addWorksheet('Lists');
+      listSheet.state = 'veryHidden';
+      const firstDataRow = headerRows + 1;
+
+      dropdownFields.forEach((field, di) => {
+        const vals = _colMeta[field].values;
+        const listCol = di + 1;
+        const listColLetter = _colLetter(listCol);
+        for (let i = 0; i < vals.length; i++) listSheet.getCell(i + 1, listCol).value = vals[i];
+        const ref = `Lists!$${listColLetter}$1:$${listColLetter}$${vals.length}`;
+
+        const targetLetter = _colLetter(leaves.indexOf(field) + 1);
+        const sqref = `${targetLetter}${firstDataRow}:${targetLetter}1048576`;
+        ws.dataValidations.add(sqref, {
+          type: 'list', allowBlank: true, formulae: [ref],
+          showErrorMessage: true, errorStyle: 'stop',
+          errorTitle: 'Недопустимое значение',
+          error: 'Выберите значение из списка.',
+        });
+      });
     }
 
     const buf = await wb.xlsx.writeBuffer();
@@ -363,6 +474,12 @@ const ExportData = (() => {
   function _colWidth(field, headerName) {
     const name = _displayName(field, headerName);
     return Math.min(42, Math.max(12, name.length + 3));
+  }
+
+  function _colLetter(n) {
+    let s = '';
+    while (n > 0) { const m = (n - 1) % 26; s = String.fromCharCode(65 + m) + s; n = Math.floor((n - 1) / 26); }
+    return s;
   }
 
   function _argb(hex) {
